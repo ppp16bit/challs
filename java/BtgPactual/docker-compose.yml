@@ -1,0 +1,37 @@
+services:
+  backend:
+    image: pppedro/btg-pactual-chall:latest
+    ports:
+      - 8080:8080
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    env_file:
+      - .env
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - ${RABBITMQ_INTERFACE_PORT}:15672
+      - ${RABBITMQ_AMQP_PORT}:5672
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - ${MONGO_PORT}:${MONGO_PORT}
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
