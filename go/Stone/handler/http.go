@@ -5,18 +5,21 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/ppp16bit/challs/internal/storage"
 	"github.com/ppp16bit/challs/internal/transaction"
-
-	"github.com/google/uuid"
+	"github.com/ppp16bit/challs/internal/worker"
 )
 
 type Handler struct {
-	store *storage.Store
+	pool *worker.Pool
 }
 
-func New(store *storage.Store) *Handler {
-	return &Handler{store: store}
+func New(pool *worker.Pool) *Handler {
+	return &Handler{pool: pool}
+}
+
+func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(h.pool.Metrics())
 }
 
 func respond(w http.ResponseWriter, code int, body any) {
@@ -30,30 +33,38 @@ func (h *Handler) ProcessTransaction(w http.ResponseWriter, r *http.Request) {
 	var request transaction.Request
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		respond(w, http.StatusUnprocessableEntity, transaction.Response{
-			Status: "reject",
-			Erorr:  "invalid payload",
+			Status: "rejected",
+			Error:  "invalid payload",
 		})
 		return
 	}
 
 	if err := transaction.Validate(request); err != nil {
-		status := "rejected"
 		errMsg := err.Error()
-
-		switch {
-		case errors.Is(err, transaction.ErrTimestampInvalid):
-			respond(w, http.StatusUnprocessableEntity, transaction.Response{Status: status, Erorr: errMsg})
-		case errors.Is(err, transaction.ErrTimestampFuture):
-			respond(w, http.StatusUnprocessableEntity, transaction.Response{Status: status, Erorr: errMsg})
-		default:
-			respond(w, http.StatusUnprocessableEntity, transaction.Response{Status: status, Erorr: errMsg})
+		if !errors.Is(err, transaction.ErrTimestampInvalid) && !errors.Is(err, transaction.ErrTimestampFuture) {
+			errMsg = "invalid payload"
 		}
+
+		respond(w, http.StatusUnprocessableEntity, transaction.Response{
+			Status: "rejected",
+			Error:  errMsg,
+		})
 		return
 	}
 
-	h.store.Save(request)
-	respond(w, http.StatusCreated, transaction.Response{
-		Status:      "approved",
-		AuthorizeID: uuid.NewString(),
+	resultCh := make(chan transaction.Response, 1)
+	submitted := h.pool.Submit(worker.Job{
+		Request:  request,
+		Response: resultCh,
 	})
+
+	if !submitted {
+		respond(w, http.StatusTooManyRequests, transaction.Response{
+			Status: "rejected",
+			Error:  "too many requests, try again later",
+		})
+		return
+	}
+	result := <-resultCh
+	respond(w, http.StatusCreated, result)
 }
