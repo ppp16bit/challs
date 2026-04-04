@@ -11,7 +11,9 @@ type Request struct {
 }
 
 type Response struct {
-	Status      string `json:"status"`
-	AuthorizeID string `json:"authorize_id,omitempty"`
-	Erorr       string `json:"error,omitempty"`
+	Status        string `json:"status"`
+	AuthorizeID   string `json:"authorize_id,omitempty"`
+	TransactionID string `json:"transaction_id,omitempty"`
+	Warning       string `json:"warning,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
